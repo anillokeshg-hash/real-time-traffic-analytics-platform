@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Real-Time Traffic Analytics Platform</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  body { font-family: Arial, sans-serif; margin: 0; background: #f2f4f8; color: #222; }
+  header { background: #2b2d42; color: #fff; padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; }
+  header h1 { margin: 0; font-size: 22px; }
+  .clock { font-size: 20px; font-weight: bold; }
+  .wrap { padding: 20px 24px; max-width: 1200px; margin: auto; }
+  .cards { display: flex; gap: 16px; flex-wrap: wrap; }
+  .card { flex: 1; min-width: 150px; background: #fff; border-radius: 8px; padding: 14px; box-shadow: 0 1px 4px rgba(0,0,0,.1); }
+  .card h3 { margin: 0 0 6px; font-size: 13px; color: #666; font-weight: normal; }
+  .card .val { font-size: 26px; font-weight: bold; }
+  .row { display: flex; gap: 16px; flex-wrap: wrap; }
+  .panel { background: #fff; border-radius: 8px; padding: 16px; margin-top: 16px; box-shadow: 0 1px 4px rgba(0,0,0,.1); flex: 1; min-width: 320px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { padding: 8px; text-align: left; border-bottom: 1px solid #eee; }
+  th { background: #fafafa; }
+  .badge { padding: 2px 8px; border-radius: 10px; color: #fff; font-size: 12px; }
+  .badge.Low { background: #1a8f3c; } .badge.Medium { background: #e08a00; } .badge.High { background: #d12d2d; }
+  .inc { color: #d12d2d; font-weight: bold; }
+  .alert { padding: 8px 10px; border-left: 4px solid #e08a00; background: #fff8ec; margin-bottom: 8px; font-size: 13px; }
+  .alert.Incident { border-color: #d12d2d; background: #fdeaea; }
+  .bar { background: #e5e7eb; border-radius: 4px; height: 8px; width: 70px; display: inline-block; vertical-align: middle; }
+  .bar span { display: block; height: 100%; border-radius: 4px; }
+  button { padding: 8px 14px; border: 0; border-radius: 6px; background: #2b2d42; color: #fff; cursor: pointer; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Real-Time Traffic Analytics Platform</h1>
+  <div>Simulated time: <span class="clock" id="clock">--:--</span></div>
+</header>
+<div class="wrap">
+  <div class="cards">
+    <div class="card"><h3>Vehicles (last 5 min)</h3><div class="val" id="vehicles">0</div></div>
+    <div class="card"><h3>Avg Speed (km/h)</h3><div class="val" id="speed">0</div></div>
+    <div class="card"><h3>Heavily Congested</h3><div class="val" style="color:#d12d2d" id="congested">0</div></div>
+    <div class="card"><h3>Incidents Detected</h3><div class="val" style="color:#d12d2d" id="incidents">0</div></div>
+  </div>
+
+  <div class="row">
+    <div class="panel" style="flex:2">
+      <button id="toggle">Pause</button>
+      <canvas id="chart" height="110" style="margin-top:12px"></canvas>
+    </div>
+    <div class="panel">
+      <h3 style="margin-top:0">Alerts</h3>
+      <div id="alerts"><small>No alerts yet.</small></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h3 style="margin-top:0">Junctions</h3>
+    <table>
+      <thead><tr><th>Junction</th><th>Vehicles</th><th>Speed (km/h)</th><th>Occupancy</th>
+        <th>Congestion (AI)</th><th>Forecast +30 min</th><th>Incident (AI)</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+const chart = new Chart(document.getElementById("chart"), {
+  type: "line",
+  data: { labels: [], datasets: [
+    { label: "Vehicles", data: [], borderColor: "#2b6cb0", yAxisID: "y", tension: .3 },
+    { label: "Avg speed (km/h)", data: [], borderColor: "#d12d2d", yAxisID: "y1", tension: .3 },
+  ]},
+  options: { animation: false, scales: {
+    y: { position: "left", title: { display: true, text: "Vehicles" } },
+    y1: { position: "right", min: 0, max: 60, grid: { drawOnChartArea: false }, title: { display: true, text: "km/h" } },
+  }}
+});
+
+let running = true;
+document.getElementById("toggle").onclick = e => {
+  running = !running;
+  e.target.textContent = running ? "Pause" : "Resume";
+};
+const loadColor = p => p >= 85 ? "#d12d2d" : p >= 55 ? "#e08a00" : "#1a8f3c";
+
+async function tick() {
+  if (!running) return;
+  const d = await (await fetch("/api/live")).json();
+
+  document.getElementById("clock").textContent = d.sim_time;
+  document.getElementById("vehicles").textContent = d.totals.vehicles;
+  document.getElementById("speed").textContent = d.totals.avg_speed;
+  document.getElementById("congested").textContent = d.totals.congested;
+  document.getElementById("incidents").textContent = d.totals.incidents;
+
+  document.getElementById("rows").innerHTML = d.junctions.map(j => `
+    <tr>
+      <td><b>${j.name}</b></td><td>${j.count}</td><td>${j.speed}</td><td>${j.occupancy}%</td>
+      <td><span class="badge ${j.level}">${j.level}</span></td>
+      <td><span class="bar"><span style="width:${Math.min(j.forecast_load, 100)}%;background:${loadColor(j.forecast_load)}"></span></span> ${j.forecast_load}%</td>
+      <td>${j.incident ? '<span class="inc">Incident!</span>' : "-"}</td>
+    </tr>`).join("");
+
+  document.getElementById("alerts").innerHTML = d.alerts.length
+    ? d.alerts.map(a => `<div class="alert ${a.type}"><b>${a.time}</b> ${a.text}</div>`).join("")
+    : "<small>No alerts yet.</small>";
+
+  chart.data.labels = d.history.map(h => h.time);
+  chart.data.datasets[0].data = d.history.map(h => h.vehicles);
+  chart.data.datasets[1].data = d.history.map(h => h.speed);
+  chart.update();
+}
+setInterval(tick, 1500);
+tick();
+</script>
+</body>
+</html>
